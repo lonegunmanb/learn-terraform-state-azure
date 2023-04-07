@@ -59,18 +59,6 @@ resource "azurerm_network_security_group" "example" {
     source_address_prefix      = "*"
     destination_address_prefix = "*"
   }
-
-  security_rule {
-    name                       = "Allow_SSH"
-    priority                   = 101
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = "22"
-    source_address_prefix      = "*"
-    destination_address_prefix = "*"
-  }
 }
 
 resource "azurerm_network_interface" "example" {
@@ -107,7 +95,7 @@ resource "azurerm_linux_virtual_machine" "example" {
     version   = "latest"
   }
   admin_username                  = "adminuser"
-  admin_password                  = random_password.pass.result
+  admin_password                  = "Password123&*()"
   disable_password_authentication = false
   custom_data                       = base64encode(<<-EOF
               #!/bin/bash
@@ -119,6 +107,10 @@ resource "azurerm_linux_virtual_machine" "example" {
               EOF
               )
 }
+
+# data "azurerm_resource_group" "example" {
+#   name = "terraform-learn-state-rg"
+# }
 
 output "public_ip" {
   value       = azurerm_linux_virtual_machine.example.public_ip_address

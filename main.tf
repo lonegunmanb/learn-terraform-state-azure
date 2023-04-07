@@ -1,80 +1,134 @@
 terraform {
   required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = ">= 3.24.1"
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 3.0"
     }
   }
   required_version = ">= 1.1.5"
 }
 
-variable "region" {
-  description = "The AWS region your resources will be deployed"
+variable "location" {
+  description = "The Azure region your resources will be deployed"
+  default     = "eastus"
 }
 
-provider "aws" {
-  region = var.region
+provider "azurerm" {
+  features {}
 }
 
-data "aws_ami" "ubuntu" {
-  most_recent = true
+resource "azurerm_resource_group" "example" {
+  name     = "terraform-learn-state-rg"
+  location = var.location
+}
 
-  filter {
-    name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*"]
+resource "azurerm_virtual_network" "example" {
+  name                = "terraform-learn-state-vnet"
+  address_space       = ["10.0.0.0/16"]
+  location            = azurerm_resource_group.example.location
+  resource_group_name = azurerm_resource_group.example.name
+}
+
+resource "azurerm_subnet" "example" {
+  name                 = "terraform-learn-state-subnet"
+  address_prefixes     = ["10.0.1.0/24"]
+  resource_group_name  = azurerm_resource_group.example.name
+  virtual_network_name = azurerm_virtual_network.example.name
+}
+
+resource "azurerm_public_ip" "example" {
+  name                = "terraform-learn-state-pip"
+  location            = azurerm_resource_group.example.location
+  resource_group_name = azurerm_resource_group.example.name
+  allocation_method   = "Dynamic"
+}
+
+resource "azurerm_network_security_group" "example" {
+  name                = "terraform-learn-state-nsg"
+  location            = azurerm_resource_group.example.location
+  resource_group_name = azurerm_resource_group.example.name
+
+  security_rule {
+    name                       = "Allow_HTTP"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "8080"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
   }
 
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
+  security_rule {
+    name                       = "Allow_SSH"
+    priority                   = 101
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "22"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
   }
-
-  owners = ["099720109477"] # Canonical
 }
 
-resource "aws_instance" "example" {
-  ami                    = data.aws_ami.ubuntu.id
-  instance_type          = "t2.micro"
-  vpc_security_group_ids = [aws_security_group.sg_8080.id]
-  user_data              = <<-EOF
+resource "azurerm_network_interface" "example" {
+  name                = "terraform-learn-state-nic"
+  location            = azurerm_resource_group.example.location
+  resource_group_name = azurerm_resource_group.example.name
+
+  ip_configuration {
+    name                          = "terraform-learn-state-ipconfig"
+    subnet_id                     = azurerm_subnet.example.id
+    private_ip_address_allocation = "Dynamic"
+    public_ip_address_id          = azurerm_public_ip.example.id
+  }
+}
+
+resource "random_password" "pass" {
+  length = 20
+}
+
+resource "azurerm_linux_virtual_machine" "example" {
+  name                  = "terraform-learn-state-vm"
+  location              = azurerm_resource_group.example.location
+  resource_group_name   = azurerm_resource_group.example.name
+  network_interface_ids = [azurerm_network_interface.example.id]
+  size                  = "Standard_F2"
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "UbuntuServer"
+    sku       = "16.04-LTS"
+    version   = "latest"
+  }
+  admin_username                  = "adminuser"
+  admin_password                  = random_password.pass.result
+  disable_password_authentication = false
+  custom_data                       = base64encode(<<-EOF
               #!/bin/bash
-              apt-get update
-              apt-get install -y apache2
+              sudo apt-get update -y
+              sudo apt-get install -y apache2
               sed -i -e 's/80/8080/' /etc/apache2/ports.conf
               echo "Hello World" > /var/www/html/index.html
-              systemctl restart apache2
+              sudo systemctl restart apache2
               EOF
-  tags = {
-    Name = "terraform-learn-state-ec2"
-  }
-}
-
-resource "aws_security_group" "sg_8080" {
-  name = "terraform-learn-state-sg-8080"
-  ingress {
-    from_port   = "8080"
-    to_port     = "8080"
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  // connectivity to ubuntu mirrors is required to run `apt-get update` and `apt-get install apache2`
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-output "instance_id" {
-  value = aws_instance.example.id
+              )
 }
 
 output "public_ip" {
-  value       = aws_instance.example.public_ip
+  value       = azurerm_linux_virtual_machine.example.public_ip_address
   description = "The public IP of the web server"
 }
 
 output "security_group" {
-  value = aws_security_group.sg_8080.id
+  value = azurerm_network_security_group.example.id
+}
+
+output "instance_id" {
+  value = azurerm_linux_virtual_machine.example.id
 }
